@@ -1,0 +1,19 @@
+# Requirements for:
+# "Supervised vs. Unsupervised Pattern Recognition for SIEM False Positive Reduction"
+# Python 3.8+
+#
+# Install with:  pip install -r requirements.txt
+# GPU (optional): pip install tensorflow[and-cuda]
+
+numpy>=1.23,<2.0
+pandas>=1.5,<3.0
+scikit-learn>=1.2,<2.0
+imbalanced-learn>=0.10,<1.0
+xgboost>=1.7,<3.0
+tensorflow>=2.10,<3.0          # or tensorflow-cpu if no GPU
+shap>=0.42,<1.0
+lime>=0.2.0.1
+matplotlib>=3.6,<4.0
+seaborn>=0.12,<1.0
+joblib>=1.2,<2.0
+requests>=2.28
