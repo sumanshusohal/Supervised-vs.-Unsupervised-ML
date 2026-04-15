@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Supervised vs. Unsupervised Pattern Recognition for SIEM False Positive Reduction
-==================================================================================
+Supervised and Unsupervised Pattern Recognition for SIEM Alert Reduction
+=========================================================================
 Companion code for:
-  Sohal, S. (2025). Supervised vs. Unsupervised Pattern Recognition for SIEM
-  False Positive Reduction. Pattern Recognition (under review).
+  Sohal, S. (2025). Supervised and Unsupervised Pattern Recognition for SIEM
+  Alert Reduction. Pattern Recognition (under review).
 
 GitHub: https://github.com/sumanshusohal/Supervised-vs.-Unsupervised-ML
 
 Pipeline
 --------
 1. Data loading and preprocessing (CIC-IDS2017)
-2. GridSearchCV hyperparameter optimisation with 3-fold CV
+2. Hyperparameter selection:
+     - Random Forest, XGBoost: GridSearchCV with 3-fold CV (f1_weighted)
+     - Isolation Forest: fixed contamination=0.1, n_estimators=100 (domain knowledge)
+     - Autoencoder: threshold = mean + 3*std of benign reconstruction errors
 3. Training: Random Forest, XGBoost, Isolation Forest, Autoencoder
 4. Evaluation: Accuracy, Precision, Recall, F1, FPR, FNR, AUC, Timing
 5. Visualisation: ROC curves, Precision-Recall curves, Confusion matrices
