@@ -216,6 +216,7 @@ def preprocess_data(df):
     )
 
     # Under-sample majority class in training set (supervised models only)
+    # X_train_sc (full scaled) is kept for unsupervised models (IF, AE)
     rus = RandomUnderSampler(random_state=42)
     X_train_res, y_train_res = rus.fit_resample(X_train_sc, y_train)
     print(f"After under-sampling — train: {X_train_res.shape}, test: {X_test_sc.shape}")
@@ -223,7 +224,7 @@ def preprocess_data(df):
     # Benign-only subset for AE training
     X_train_normal = X_train_sc[y_train == 0]
 
-    return X_train_res, X_test_sc, y_train_res, y_test, feature_names, X_train_normal
+    return X_train_res, X_test_sc, y_train_res, y_test, feature_names, X_train_normal, X_train_sc
 
 
 # ---------------------------------------------------------------------------- #
@@ -239,12 +240,6 @@ XGB_GRID = {
     "n_estimators":  [50, 100],
     "learning_rate": [0.05, 0.1],
     "max_depth":     [3, 5],
-}
-
-IF_GRID = {
-    "n_estimators":  [50, 100],
-    "max_samples":   ["auto", 0.5],
-    "contamination": [0.1, 0.3, 0.5],
 }
 
 
@@ -285,36 +280,34 @@ def train_xgboost(X_train, y_train):
 # ---------------------------------------------------------------------------- #
 #  Unsupervised Training                                                        #
 # ---------------------------------------------------------------------------- #
-def train_isolation_forest(X_train, y_train):
+def train_isolation_forest(X_train_full):
     """
-    Select best contamination via grid evaluation on held-out training fold.
-    Note: IF is unsupervised but we expose labels here solely for evaluation.
+    Train Isolation Forest on the full (non-resampled) scaled training set.
+
+    Parameters are fixed a priori from domain knowledge:
+      contamination = 0.1  (conservative upper bound on attack fraction)
+      n_estimators  = 100  (standard ensemble size)
+
+    No labels are used at any point — this is a genuinely unsupervised procedure.
+    X_train_full must be the complete scaled training set, NOT the under-sampled
+    version used for supervised models.
     """
-    print("\n--- Training Isolation Forest (parameter search) ---")
+    print("\n--- Training Isolation Forest (unsupervised, fixed hyperparameters) ---")
     t0 = time.time()
-    best_f1, best_clf = -1, None
-
-    for n_est in IF_GRID["n_estimators"]:
-        for samp in IF_GRID["max_samples"]:
-            for cont in IF_GRID["contamination"]:
-                clf = IsolationForest(
-                    n_estimators=n_est, max_samples=samp,
-                    contamination=cont, random_state=42, n_jobs=-1,
-                )
-                clf.fit(X_train)
-                preds = np.where(clf.predict(X_train) == -1, 1, 0)
-                score = f1_score(y_train, preds, zero_division=0)
-                if score > best_f1:
-                    best_f1, best_clf = score, clf
-
+    clf = IsolationForest(
+        n_estimators=100,
+        contamination=0.1,
+        max_samples="auto",
+        random_state=42,
+        n_jobs=-1,
+    )
+    clf.fit(X_train_full)
     elapsed = time.time() - t0
-    params = {
-        "n_estimators":  best_clf.n_estimators,
-        "contamination": best_clf.contamination,
-        "max_samples":   best_clf.max_samples,
-    }
-    print(f"Best params: {params}  |  Train time: {elapsed:.1f}s")
-    return best_clf, elapsed
+    print(
+        f"Isolation Forest trained on {X_train_full.shape[0]:,} samples "
+        f"(contamination=0.1, n_estimators=100)  |  Train time: {elapsed:.1f}s"
+    )
+    return clf, elapsed
 
 
 # ---------------------------------------------------------------------------- #
@@ -544,14 +537,14 @@ def main(run_ae=True):
     # ── 1. Load & preprocess ────────────────────────────────────────────────
     if os.path.exists(PREPROCESSED):
         print("Loading preprocessed data from cache ...")
-        X_train, X_test, y_train, y_test, features, X_normal = joblib.load(PREPROCESSED)
+        X_train, X_test, y_train, y_test, features, X_normal, X_train_full = joblib.load(PREPROCESSED)
     else:
         raw = download_and_load_data()
         if raw is None:
             sys.exit("Data loading failed.")
-        X_train, X_test, y_train, y_test, features, X_normal = preprocess_data(raw)
+        X_train, X_test, y_train, y_test, features, X_normal, X_train_full = preprocess_data(raw)
         joblib.dump(
-            (X_train, X_test, y_train, y_test, features, X_normal),
+            (X_train, X_test, y_train, y_test, features, X_normal, X_train_full),
             PREPROCESSED,
         )
         print("Preprocessed data cached.")
@@ -596,7 +589,8 @@ def main(run_ae=True):
         print("Loading cached Isolation Forest ...")
         ifo, if_time = joblib.load(if_path)
     else:
-        ifo, if_time = train_isolation_forest(X_train, y_train)
+        # Pass full scaled training set — IF is purely unsupervised, no labels used
+        ifo, if_time = train_isolation_forest(X_train_full)
         joblib.dump((ifo, if_time), if_path)
 
     m_if, pred_if, score_if = evaluate_isolation_forest(ifo, X_test, y_test, if_time)
