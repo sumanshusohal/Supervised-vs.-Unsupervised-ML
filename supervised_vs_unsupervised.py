@@ -32,7 +32,7 @@ Usage
 # ---------------------------------------------------------------------------- #
 def _ensure(package, import_name=None):
     """Install *package* via pip if it cannot be imported."""
-    import importlib, subprocess
+    import importlib, subprocess, sys
     name = import_name or package
     try:
         importlib.import_module(name)
@@ -102,7 +102,7 @@ warnings.filterwarnings("ignore")
 BASE_DIR    = "experiment_results"
 MODELS_DIR  = os.path.join(BASE_DIR, "models")
 FIGURES_DIR = os.path.join(BASE_DIR, "figures")
-DATA_DIR    = "CICIDS2017_data"
+DATA_DIR    = "CICIDS2017_data"          # overridden by --data-dir at runtime
 RESULTS_CSV = os.path.join(BASE_DIR, "model_comparison_results.csv")
 PREPROCESSED = os.path.join(BASE_DIR, "preprocessed_data.joblib")
 
@@ -114,31 +114,37 @@ DATASET_URL = (
 #  Data Loading                                                                 #
 # ---------------------------------------------------------------------------- #
 def download_and_load_data():
-    """Download CIC-IDS2017, extract, and return concatenated DataFrame."""
-    zip_path = os.path.join(DATA_DIR, "MachineLearningCSV.zip")
+    """Load CIC-IDS2017 CSVs from DATA_DIR, downloading/extracting only if needed."""
     os.makedirs(DATA_DIR, exist_ok=True)
 
-    if not os.path.exists(zip_path):
-        print(f"Downloading dataset from {DATASET_URL} ...")
+    # Check whether CSVs are already present — skip download & extraction if so
+    existing_csvs = [
+        f for root, _, files in os.walk(DATA_DIR)
+        for f in files if f.endswith(".csv")
+    ]
+    if existing_csvs:
+        print(f"Found {len(existing_csvs)} CSV file(s) in {DATA_DIR} — skipping download/extraction.")
+    else:
+        zip_path = os.path.join(DATA_DIR, "MachineLearningCSV.zip")
+        if not os.path.exists(zip_path):
+            print(f"Downloading dataset from {DATASET_URL} ...")
+            try:
+                r = requests.get(DATASET_URL, stream=True, timeout=600)
+                r.raise_for_status()
+                with open(zip_path, "wb") as f:
+                    for chunk in r.iter_content(8192):
+                        f.write(chunk)
+                print("Download complete.")
+            except Exception as e:
+                print(f"Download failed: {e}")
+                return None
         try:
-            r = requests.get(DATASET_URL, stream=True, timeout=600)
-            r.raise_for_status()
-            with open(zip_path, "wb") as f:
-                for chunk in r.iter_content(8192):
-                    f.write(chunk)
-            print("Download complete.")
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(DATA_DIR)
+            print("Extraction complete.")
         except Exception as e:
-            print(f"Download failed: {e}")
+            print(f"Extraction failed: {e}")
             return None
-
-    # Extract
-    try:
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(DATA_DIR)
-        print("Extraction complete.")
-    except Exception as e:
-        print(f"Extraction failed: {e}")
-        return None
 
     # Load all CSVs
     frames = []
@@ -653,9 +659,14 @@ def main(run_ae=True):
 # ---------------------------------------------------------------------------- #
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Supervised vs. Unsupervised ML for SIEM FP Reduction"
+        description="Supervised and Unsupervised Pattern Recognition for SIEM Alert Reduction"
     )
     parser.add_argument("--no-ae", action="store_true",
                         help="Skip Autoencoder training")
+    parser.add_argument("--data-dir", default=None,
+                        help="Path to folder containing CIC-IDS2017 CSV files "
+                             "(skips download/extraction if CSVs are already present)")
     args = parser.parse_args()
+    if args.data_dir:
+        DATA_DIR = args.data_dir
     main(run_ae=not args.no_ae)
