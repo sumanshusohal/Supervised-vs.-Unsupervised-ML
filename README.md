@@ -2,7 +2,7 @@
 
 Companion code for the paper submitted to **Pattern Recognition** (Elsevier).
 
-> Sohal, S. (2025). Supervised vs. Unsupervised Pattern Recognition for SIEM False Positive Reduction. *Pattern Recognition* (under review).
+> Sohal, S. (2025). Supervised and Unsupervised Pattern Recognition for SIEM Alert Reduction. *Pattern Recognition* (under review, PR-D-25-05676).
 
 ---
 
@@ -29,12 +29,12 @@ The problem is framed as a pattern recognition challenge: distinguishing normal 
 
 ## Key Results
 
-| Model | Accuracy | FPR | FNR | ROC-AUC |
-|---|---|---|---|---|
-| Random Forest | 99.66 % | **0.23 %** | 0.85 % | 0.9997 |
-| XGBoost | 95.30 % | 4.74 % | 4.47 % | 0.9932 |
-| Isolation Forest | 77.99 % | 8.53 % | 88.37 % | 0.6441 |
-| Autoencoder | 88.83 % | 5.01 % | 41.44 % | 0.9060 |
+| Model | Accuracy | FPR | FNR | ROC-AUC | Train (s) |
+|---|---|---|---|---|---|
+| Random Forest | 99.86 % | **0.12 %** | 0.28 % | 0.9999 | 1,081 |
+| XGBoost | 99.78 % | 0.21 % | 0.24 % | 0.9999 | 129 |
+| Isolation Forest | 83.91 % | 6.48 % | 70.27 % | 0.8367 | 19 |
+| Autoencoder | 90.69 % | 1.87 % | 51.25 % | 0.9121 | 80 |
 
 FPR (False Positive Rate) is the primary operational metric — it directly measures analyst workload in SIEM environments.
 
@@ -76,9 +76,9 @@ Missing packages are installed automatically on first run.
 2. **Data loading** — downloads and merges all CIC-IDS2017 CSV files
 3. **Preprocessing** — cleaning, feature selection, MinMaxScaler, RandomUnderSampler
 4. **Training**
-   - Supervised: `GridSearchCV` (3-fold CV, weighted F1 objective)
-   - Isolation Forest: grid search over contamination / n_estimators
-   - Autoencoder: trained on benign-only traffic; threshold = mean + 3σ reconstruction error
+   - Supervised (RF, XGBoost): `GridSearchCV` (3-fold CV, weighted F1 objective)
+   - Isolation Forest: fixed hyperparameters (`contamination=0.1`, `n_estimators=100`); trained on full unsampled training set — genuinely unsupervised
+   - Autoencoder: trained on benign-only traffic; threshold = μ + 3σ of reconstruction error on benign training subset
 5. **Evaluation** — Accuracy, Precision, Recall, F1, FPR, FNR, AUC, timing
 6. **Visualisation** — ROC curves, Precision-Recall curves, Confusion matrices, FPR/FNR bar chart
 7. **SHAP** — feature importance for supervised models

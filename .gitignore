@@ -1,0 +1,29 @@
+# Large data and model artefacts — do not commit
+experiment_results/preprocessed_data.joblib
+experiment_results/models/*.joblib
+experiment_results/models/*.h5
+
+# Dataset files
+data/
+*.zip
+
+# Python artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db

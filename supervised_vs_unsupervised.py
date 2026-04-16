@@ -30,23 +30,34 @@ Usage
 # ---------------------------------------------------------------------------- #
 #  Auto-install missing dependencies                                            #
 # ---------------------------------------------------------------------------- #
-def _ensure(package, import_name=None):
-    """Install *package* via pip if it cannot be imported."""
+def _ensure(package, import_name=None, optional=False):
+    """Install *package* via pip if it cannot be imported.
+    If optional=True, a failed install prints a warning but does not crash.
+    """
     import importlib, subprocess, sys
     name = import_name or package
     try:
         importlib.import_module(name)
     except ImportError:
         print(f"[setup] Installing {package} ...")
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--quiet", package]
-        )
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--quiet", package]
+            )
+        except Exception as e:
+            if optional:
+                print(f"[setup] Warning: could not install {package} ({e}). "
+                      f"Related features will be disabled.")
+            else:
+                raise
 
 import sys as _sys  # needed before setup runs
 
-_ensure("tensorflow")
+# Optional — skip if disk is full or not needed (AE/SHAP still work without TF/lime)
+_ensure("tensorflow",      optional=True)
+_ensure("lime",            optional=True)
+# Required for core pipeline
 _ensure("shap")
-_ensure("lime")
 _ensure("imbalanced-learn", "imblearn")
 _ensure("xgboost")
 _ensure("scikit-learn", "sklearn")
@@ -146,11 +157,14 @@ def download_and_load_data():
             print(f"Extraction failed: {e}")
             return None
 
-    # Load all CSVs
+    # Load all CSVs — deduplicate by filename to avoid double-loading when the
+    # same files appear in both the top-level directory and a subdirectory
     frames = []
+    seen_names = set()
     for root, _, files in os.walk(DATA_DIR):
         for fname in files:
-            if fname.endswith(".csv"):
+            if fname.endswith(".csv") and fname not in seen_names:
+                seen_names.add(fname)
                 path = os.path.join(root, fname)
                 try:
                     df = pd.read_csv(path, encoding="latin1", low_memory=False)
@@ -260,13 +274,19 @@ def train_random_forest(X_train, y_train):
     print("\n--- Training Random Forest (GridSearchCV) ---")
     t0 = time.time()
     gs = GridSearchCV(
-        RandomForestClassifier(random_state=42, n_jobs=-1),
-        RF_GRID, cv=3, scoring="f1_weighted", n_jobs=-1, verbose=0,
+        # n_jobs=1 on the estimator avoids nested parallelism / RAM explosion
+        RandomForestClassifier(random_state=42, n_jobs=1),
+        RF_GRID, cv=3, scoring="f1_weighted",
+        n_jobs=4,   # 4 parallel CV workers — balances speed vs. memory
+        verbose=0,
     )
     gs.fit(X_train, y_train)
     elapsed = time.time() - t0
     print(f"Best params: {gs.best_params_}  |  Train time: {elapsed:.1f}s")
-    return gs.best_estimator_, elapsed
+    # Refit best estimator with all cores for final inference speed
+    best = gs.best_estimator_
+    best.set_params(n_jobs=-1)
+    return best, elapsed
 
 
 def train_xgboost(X_train, y_train):
@@ -276,14 +296,18 @@ def train_xgboost(X_train, y_train):
     gs = GridSearchCV(
         XGBClassifier(
             use_label_encoder=False, eval_metric="logloss",
-            random_state=42, n_jobs=-1,
+            random_state=42, n_jobs=1,
         ),
-        XGB_GRID, cv=3, scoring="f1_weighted", n_jobs=-1, verbose=0,
+        XGB_GRID, cv=3, scoring="f1_weighted",
+        n_jobs=4,
+        verbose=0,
     )
     gs.fit(X_train, y_train)
     elapsed = time.time() - t0
     print(f"Best params: {gs.best_params_}  |  Train time: {elapsed:.1f}s")
-    return gs.best_estimator_, elapsed
+    best = gs.best_estimator_
+    best.set_params(n_jobs=-1)
+    return best, elapsed
 
 
 # ---------------------------------------------------------------------------- #
@@ -552,11 +576,20 @@ def main(run_ae=True):
         if raw is None:
             sys.exit("Data loading failed.")
         X_train, X_test, y_train, y_test, features, X_normal, X_train_full = preprocess_data(raw)
-        joblib.dump(
-            (X_train, X_test, y_train, y_test, features, X_normal, X_train_full),
-            PREPROCESSED,
-        )
-        print("Preprocessed data cached.")
+        # Only cache preprocessed data if there is sufficient free disk space (>2 GB)
+        try:
+            import shutil
+            free_gb = shutil.disk_usage(BASE_DIR).free / 1e9
+            if free_gb > 2.0:
+                joblib.dump(
+                    (X_train, X_test, y_train, y_test, features, X_normal, X_train_full),
+                    PREPROCESSED,
+                )
+                print("Preprocessed data cached.")
+            else:
+                print(f"Skipping preprocessed cache (only {free_gb:.1f} GB free — need >2 GB).")
+        except Exception:
+            pass
 
     input_dim   = X_train.shape[1]
     results     = []
@@ -610,12 +643,13 @@ def main(run_ae=True):
 
     # ── 5. Autoencoder ──────────────────────────────────────────────────────
     if run_ae and TF_OK:
-        ae_path = os.path.join(MODELS_DIR, "autoencoder")
-        if os.path.exists(ae_path + ".threshold"):
+        ae_path = os.path.join(MODELS_DIR, "autoencoder.keras")
+        ae_thresh_path = os.path.join(MODELS_DIR, "autoencoder.threshold")
+        if os.path.exists(ae_thresh_path):
             print("Loading cached Autoencoder ...")
             from tensorflow.keras.models import load_model
             ae = load_model(ae_path)
-            ae_thresh = float(open(ae_path + ".threshold").read())
+            ae_thresh = float(open(ae_thresh_path).read())
             ae_time = 0.0
         else:
             ae, ae_thresh, ae_time = train_autoencoder(
@@ -623,7 +657,7 @@ def main(run_ae=True):
             )
             if ae is not None:
                 ae.save(ae_path)
-                with open(ae_path + ".threshold", "w") as f:
+                with open(ae_thresh_path, "w") as f:
                     f.write(str(ae_thresh))
 
         if ae is not None:
@@ -644,7 +678,7 @@ def main(run_ae=True):
                     "FPR", "FNR", "ROC-AUC", "Train Time (s)", "Inference (s/1k)"]
     print(results_df[[c for c in display_cols if c in results_df.columns]].to_string())
     results_df.to_csv(RESULTS_CSV)
-    print(f"\nResults saved → {RESULTS_CSV}")
+    print(f"\nResults saved: {RESULTS_CSV}")
 
     plot_summary_bar(results_df)
 
