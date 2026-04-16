@@ -76,9 +76,10 @@ Missing packages are installed automatically on first run.
 2. **Data loading** — downloads and merges all CIC-IDS2017 CSV files
 3. **Preprocessing** — cleaning, feature selection, MinMaxScaler, RandomUnderSampler
 4. **Training**
-   - Supervised (RF, XGBoost): `GridSearchCV` (3-fold CV, weighted F1 objective)
-   - Isolation Forest: fixed hyperparameters (`contamination=0.1`, `n_estimators=100`); trained on full unsampled training set — genuinely unsupervised
-   - Autoencoder: trained on benign-only traffic; threshold = μ + 3σ of reconstruction error on benign training subset
+   - **Random Forest**: `GridSearchCV` (3-fold CV, weighted F1); grid over `n_estimators`, `max_depth`, `min_samples_split`
+   - **XGBoost**: `GridSearchCV` (3-fold CV, weighted F1); grid over `n_estimators`, `learning_rate`, `max_depth`
+   - **Isolation Forest**: fixed hyperparameters (`contamination=0.1`, `n_estimators=100`); trained on full unsampled training set — genuinely unsupervised
+   - **Autoencoder**: trained on benign-only traffic; anomaly threshold = μ + 3σ of reconstruction error on benign training subset
 5. **Evaluation** — Accuracy, Precision, Recall, F1, FPR, FNR, AUC, timing
 6. **Visualisation** — ROC curves, Precision-Recall curves, Confusion matrices, FPR/FNR bar chart
 7. **SHAP** — feature importance for supervised models
